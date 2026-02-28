@@ -1,0 +1,8 @@
+{
+  "name": "shared",
+  "version": "1.0.0",
+  "main": "types.ts",
+  "scripts": {
+    "build": "echo 'shared types - no build needed'"
+  }
+}

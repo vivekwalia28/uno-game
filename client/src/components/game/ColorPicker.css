@@ -1,0 +1,46 @@
+.color-picker-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.color-picker {
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 28px;
+  text-align: center;
+}
+
+.color-picker h3 {
+  margin-bottom: 20px;
+  font-size: 20px;
+}
+
+.color-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.color-option {
+  padding: 20px;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 700;
+  color: white;
+  border: 3px solid transparent;
+  transition: border-color 0.2s;
+}
+
+.color-option:hover {
+  border-color: white;
+}
+
+.color-option-red { background: var(--red); }
+.color-option-blue { background: var(--blue); }
+.color-option-green { background: var(--green); }
+.color-option-yellow { background: var(--yellow); color: #333; }
