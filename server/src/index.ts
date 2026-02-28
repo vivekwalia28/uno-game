@@ -16,7 +16,9 @@ app.use(cors({ origin: CORS_ORIGIN }));
 app.use(express.json());
 
 // Serve static client build in production
-const clientDist = path.join(__dirname, '../../client/dist');
+// In Docker: __dirname = /app/server/dist/server/src, client dist = /app/client/dist
+// In dev: __dirname = .../server/src, client dist = .../client/dist
+const clientDist = path.join(__dirname, '../../../../client/dist');
 app.use(express.static(clientDist));
 
 app.get('/health', (_req, res) => {
