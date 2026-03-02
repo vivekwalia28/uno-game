@@ -5,13 +5,13 @@ import GameBoard from '../components/game/GameBoard';
 import GameOverModal from '../components/game/GameOverModal';
 import Toast from '../components/ui/Toast';
 import VoiceControls from '../components/voice/VoiceControls';
-import { useVoiceChat } from '../hooks/useVoiceChat';
+import { useVoice } from '../context/VoiceChatContext';
 import './GamePage.css';
 
 export default function GamePage() {
   const { gameState, room } = useGame();
   const navigate = useNavigate();
-  const voice = useVoiceChat(!!room);
+  const voice = useVoice();
 
   useEffect(() => {
     if (!gameState && !room) {

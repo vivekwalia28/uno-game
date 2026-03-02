@@ -4,7 +4,7 @@ import { useGame } from '../context/GameContext';
 import { useSocket } from '../context/SocketContext';
 import { useRoom } from '../hooks/useRoom';
 import VoiceControls from '../components/voice/VoiceControls';
-import { useVoiceChat } from '../hooks/useVoiceChat';
+import { useVoice } from '../context/VoiceChatContext';
 import Toast from '../components/ui/Toast';
 import './LobbyPage.css';
 
@@ -13,7 +13,7 @@ export default function LobbyPage() {
   const { socket } = useSocket();
   const { leaveRoom, startGame } = useRoom();
   const navigate = useNavigate();
-  const voice = useVoiceChat(!!room);
+  const voice = useVoice();
 
   // Redirect to game when game starts
   useEffect(() => {

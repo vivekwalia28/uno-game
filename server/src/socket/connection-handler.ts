@@ -23,6 +23,9 @@ export function handleDisconnect(io: IO, socket: ClientSocket): void {
     room.playerNames.delete(player.name);
     roomStore.removeSocket(socket.id);
 
+    // Notify voice peers
+    socket.to(roomCode).emit('voice:peer_left', socket.id);
+
     if (room.players.length === 0) {
       roomStore.delete(roomCode);
       return;
@@ -43,6 +46,9 @@ export function handleDisconnect(io: IO, socket: ClientSocket): void {
     player.isConnected = false;
     player.disconnectedAt = Date.now();
     io.to(roomCode).emit('player:disconnected', socket.id);
+
+    // Notify voice peers so they clean up immediately
+    socket.to(roomCode).emit('voice:peer_left', socket.id);
 
     // Notify game engine
     if (room.engine) {

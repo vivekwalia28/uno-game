@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { SocketProvider } from './context/SocketContext';
 import { GameProvider } from './context/GameContext';
+import { VoiceChatProvider } from './context/VoiceChatContext';
 import './index.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
@@ -11,7 +12,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <BrowserRouter>
       <SocketProvider>
         <GameProvider>
-          <App />
+          <VoiceChatProvider>
+            <App />
+          </VoiceChatProvider>
         </GameProvider>
       </SocketProvider>
     </BrowserRouter>

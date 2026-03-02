@@ -67,12 +67,12 @@ export function rejoinRoom(roomCode: string, socketId: string, playerName: strin
   const room = roomStore.get(roomCode);
   if (!room) return { success: false, error: 'Room not found' };
 
-  // Find the disconnected player by name
+  // Find the player by name
   const player = room.players.find(p => p.name === playerName);
   if (!player) return { success: false, error: 'Player not found in room' };
-  if (player.isConnected) return { success: false, error: 'Player already connected' };
 
-  // Update socket mapping: remove old, set new
+  // Allow rejoin even if still marked connected (race condition: new socket
+  // connects before old disconnect is processed after page refresh)
   const oldSocketId = player.id;
   roomStore.removeSocket(oldSocketId);
 
