@@ -18,8 +18,9 @@ export function useVoiceChat(roomJoined: boolean) {
   const peersRef = useRef<Map<string, PeerConnection>>(new Map());
   const analyserNodesRef = useRef<Map<string, AnalyserNode>>(new Map());
   const audioContextRef = useRef<AudioContext | null>(null);
+  // Use a ref to track voice active state so socket handlers always see current value
+  const isVoiceActiveRef = useRef(false);
 
-  // Ensure AudioContext is created and resumed (must be called during user gesture)
   const ensureAudioContext = useCallback(() => {
     if (!audioContextRef.current) {
       audioContextRef.current = new AudioContext();
@@ -80,10 +81,8 @@ export function useVoiceChat(roomJoined: boolean) {
       audio.autoplay = true;
       audio.srcObject = remoteStream;
 
-      // Try to play — if blocked, retry on next user interaction
       const tryPlay = () => {
         audio.play().catch(() => {
-          // Autoplay blocked — retry once on any user click
           const onClick = () => {
             audio.play().catch(() => {});
             document.removeEventListener('click', onClick);
@@ -93,18 +92,16 @@ export function useVoiceChat(roomJoined: boolean) {
       };
       tryPlay();
 
-      // Also route through AudioContext for speaking detection
+      // Route through AudioContext for speaking detection + backup playback
       const ctx = ensureAudioContext();
       if (ctx.state === 'suspended') ctx.resume();
       const source = ctx.createMediaStreamSource(remoteStream);
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 512;
       source.connect(analyser);
-      // Connect to destination as backup playback path
       source.connect(ctx.destination);
       analyserNodesRef.current.set(targetId, analyser);
 
-      // Store the audio element reference to prevent GC
       const conn = peersRef.current.get(targetId);
       if (conn) {
         conn.stream = remoteStream;
@@ -147,11 +144,10 @@ export function useVoiceChat(roomJoined: boolean) {
   const joinVoice = useCallback(async () => {
     if (!socket) return;
     try {
-      // Create and resume AudioContext during user gesture (click)
       ensureAudioContext();
-
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       localStreamRef.current = stream;
+      isVoiceActiveRef.current = true;
       setIsVoiceActive(true);
       socket.emit('voice:join');
     } catch (err) {
@@ -162,7 +158,6 @@ export function useVoiceChat(roomJoined: boolean) {
   const leaveVoice = useCallback(() => {
     if (!socket) return;
 
-    // Close all peers and clean up audio elements
     for (const [, conn] of peersRef.current) {
       conn.peer.destroy();
       if (conn.audioElement) {
@@ -174,12 +169,12 @@ export function useVoiceChat(roomJoined: boolean) {
     analyserNodesRef.current.clear();
     setPeers(new Map());
 
-    // Stop local stream
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(t => t.stop());
       localStreamRef.current = null;
     }
 
+    isVoiceActiveRef.current = false;
     setIsVoiceActive(false);
     socket.emit('voice:leave');
   }, [socket]);
@@ -215,12 +210,13 @@ export function useVoiceChat(roomJoined: boolean) {
     return () => clearInterval(interval);
   }, [isVoiceActive]);
 
-  // Socket event listeners
+  // Socket event listeners — use refs for guards to avoid stale closures
   useEffect(() => {
     if (!socket || !roomJoined) return;
 
     const handlePeerJoined = (peerId: string) => {
-      if (!localStreamRef.current || !isVoiceActive) return;
+      // Use refs (always current) instead of state values (stale in closure)
+      if (!localStreamRef.current || !isVoiceActiveRef.current) return;
       createPeer(peerId, true, localStreamRef.current);
     };
 
@@ -228,7 +224,7 @@ export function useVoiceChat(roomJoined: boolean) {
       const existing = peersRef.current.get(data.fromId);
       if (existing) {
         existing.peer.signal(data.signal as SimplePeer.SignalData);
-      } else if (localStreamRef.current && isVoiceActive) {
+      } else if (localStreamRef.current && isVoiceActiveRef.current) {
         const peer = createPeer(data.fromId, false, localStreamRef.current);
         if (peer) {
           peer.signal(data.signal as SimplePeer.SignalData);
@@ -259,7 +255,8 @@ export function useVoiceChat(roomJoined: boolean) {
       socket.off('voice:signal', handleSignal);
       socket.off('voice:peer_left', handlePeerLeft);
     };
-  }, [socket, roomJoined, isVoiceActive, createPeer]);
+  // Removed isVoiceActive from deps — handlers use isVoiceActiveRef instead
+  }, [socket, roomJoined, createPeer]);
 
   // Cleanup on unmount
   useEffect(() => {
