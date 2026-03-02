@@ -5,6 +5,7 @@ import { useSocket } from '../context/SocketContext';
 interface PeerConnection {
   peer: SimplePeer.Instance;
   stream: MediaStream | null;
+  audioElement: HTMLAudioElement | null;
   isSpeaking: boolean;
 }
 
@@ -18,8 +19,29 @@ export function useVoiceChat(roomJoined: boolean) {
   const analyserNodesRef = useRef<Map<string, AnalyserNode>>(new Map());
   const audioContextRef = useRef<AudioContext | null>(null);
 
+  // Ensure AudioContext is created and resumed (must be called during user gesture)
+  const ensureAudioContext = useCallback(() => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new AudioContext();
+    }
+    if (audioContextRef.current.state === 'suspended') {
+      audioContextRef.current.resume();
+    }
+    return audioContextRef.current;
+  }, []);
+
   const createPeer = useCallback((targetId: string, initiator: boolean, stream: MediaStream) => {
     if (!socket) return null;
+
+    // Destroy existing peer for this target if any
+    const existing = peersRef.current.get(targetId);
+    if (existing) {
+      existing.peer.destroy();
+      if (existing.audioElement) {
+        existing.audioElement.pause();
+        existing.audioElement.srcObject = null;
+      }
+    }
 
     const peer = new SimplePeer({
       initiator,
@@ -53,31 +75,51 @@ export function useVoiceChat(roomJoined: boolean) {
     });
 
     peer.on('stream', (remoteStream) => {
-      // Play remote audio
+      // Play remote audio using a persistent Audio element
       const audio = new Audio();
+      audio.autoplay = true;
       audio.srcObject = remoteStream;
-      audio.play().catch(() => {});
 
-      // Set up speaking detection
-      if (!audioContextRef.current) {
-        audioContextRef.current = new AudioContext();
-      }
-      const ctx = audioContextRef.current;
+      // Try to play — if blocked, retry on next user interaction
+      const tryPlay = () => {
+        audio.play().catch(() => {
+          // Autoplay blocked — retry once on any user click
+          const onClick = () => {
+            audio.play().catch(() => {});
+            document.removeEventListener('click', onClick);
+          };
+          document.addEventListener('click', onClick, { once: true });
+        });
+      };
+      tryPlay();
+
+      // Also route through AudioContext for speaking detection
+      const ctx = ensureAudioContext();
+      if (ctx.state === 'suspended') ctx.resume();
       const source = ctx.createMediaStreamSource(remoteStream);
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 512;
       source.connect(analyser);
+      // Connect to destination as backup playback path
+      source.connect(ctx.destination);
       analyserNodesRef.current.set(targetId, analyser);
 
+      // Store the audio element reference to prevent GC
       const conn = peersRef.current.get(targetId);
       if (conn) {
         conn.stream = remoteStream;
+        conn.audioElement = audio;
         peersRef.current.set(targetId, conn);
         setPeers(new Map(peersRef.current));
       }
     });
 
     peer.on('close', () => {
+      const conn = peersRef.current.get(targetId);
+      if (conn?.audioElement) {
+        conn.audioElement.pause();
+        conn.audioElement.srcObject = null;
+      }
       peersRef.current.delete(targetId);
       analyserNodesRef.current.delete(targetId);
       setPeers(new Map(peersRef.current));
@@ -85,20 +127,29 @@ export function useVoiceChat(roomJoined: boolean) {
 
     peer.on('error', (err) => {
       console.error(`Peer error with ${targetId}:`, err.message);
+      const conn = peersRef.current.get(targetId);
+      if (conn?.audioElement) {
+        conn.audioElement.pause();
+        conn.audioElement.srcObject = null;
+      }
       peersRef.current.delete(targetId);
+      analyserNodesRef.current.delete(targetId);
       setPeers(new Map(peersRef.current));
     });
 
-    const connection: PeerConnection = { peer, stream: null, isSpeaking: false };
+    const connection: PeerConnection = { peer, stream: null, audioElement: null, isSpeaking: false };
     peersRef.current.set(targetId, connection);
     setPeers(new Map(peersRef.current));
 
     return peer;
-  }, [socket]);
+  }, [socket, ensureAudioContext]);
 
   const joinVoice = useCallback(async () => {
     if (!socket) return;
     try {
+      // Create and resume AudioContext during user gesture (click)
+      ensureAudioContext();
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       localStreamRef.current = stream;
       setIsVoiceActive(true);
@@ -106,14 +157,18 @@ export function useVoiceChat(roomJoined: boolean) {
     } catch (err) {
       console.error('Failed to get microphone:', err);
     }
-  }, [socket]);
+  }, [socket, ensureAudioContext]);
 
   const leaveVoice = useCallback(() => {
     if (!socket) return;
 
-    // Close all peers
+    // Close all peers and clean up audio elements
     for (const [, conn] of peersRef.current) {
       conn.peer.destroy();
+      if (conn.audioElement) {
+        conn.audioElement.pause();
+        conn.audioElement.srcObject = null;
+      }
     }
     peersRef.current.clear();
     analyserNodesRef.current.clear();
@@ -185,6 +240,10 @@ export function useVoiceChat(roomJoined: boolean) {
       const conn = peersRef.current.get(peerId);
       if (conn) {
         conn.peer.destroy();
+        if (conn.audioElement) {
+          conn.audioElement.pause();
+          conn.audioElement.srcObject = null;
+        }
         peersRef.current.delete(peerId);
         analyserNodesRef.current.delete(peerId);
         setPeers(new Map(peersRef.current));
@@ -207,6 +266,10 @@ export function useVoiceChat(roomJoined: boolean) {
     return () => {
       for (const [, conn] of peersRef.current) {
         conn.peer.destroy();
+        if (conn.audioElement) {
+          conn.audioElement.pause();
+          conn.audioElement.srcObject = null;
+        }
       }
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(t => t.stop());
