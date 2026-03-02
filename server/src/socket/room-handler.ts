@@ -65,8 +65,9 @@ export function registerRoomHandlers(io: IO, socket: ClientSocket): void {
       socket.to(result.room.code).emit('player:reconnected', player.id);
     }
 
-    // If game is in progress, send current game state
-    if (result.room.status === 'playing' && result.room.engine) {
+    // If game engine exists, send current game state (check engine, not room status,
+    // because room.status may be stale after disconnect/reconnect race)
+    if (result.room.engine) {
       const clientState = result.room.engine.getClientState(socket.id);
       io.to(socket.id).emit('game:started', clientState);
     }

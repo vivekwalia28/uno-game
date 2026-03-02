@@ -266,14 +266,11 @@ export class UnoEngine {
       this.skipDisconnectedPlayers();
     }
 
-    // Check if all players disconnected
+    // Only end the game if ALL players disconnected (no one left to play)
     const connectedCount = this.state.players.filter(p => p.isConnected).length;
-    if (connectedCount <= 1 && this.state.status === 'playing') {
-      const winner = this.state.players.find(p => p.isConnected);
-      if (winner) {
-        this.state.status = 'finished';
-        this.state.winnerId = winner.id;
-      }
+    if (connectedCount === 0 && this.state.status === 'playing') {
+      this.state.status = 'finished';
+      this.state.winnerId = null;
     }
   }
 

@@ -15,7 +15,11 @@ export function handleDisconnect(io: IO, socket: ClientSocket): void {
   if (!room) return;
 
   const player = room.players.find(p => p.id === socket.id);
-  if (!player) return;
+  if (!player) {
+    // Player's socket ID was already updated by rejoin — this is a stale disconnect
+    roomStore.removeSocket(socket.id);
+    return;
+  }
 
   if (room.status === 'waiting') {
     // In lobby, just remove the player

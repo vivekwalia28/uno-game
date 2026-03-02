@@ -57,6 +57,17 @@ export function useRoom() {
         saveSession({ roomCode: res.room.code, playerName });
         dispatch({ type: 'SET_ROOM', room: res.room });
         navigate('/lobby');
+      } else if (res.error === 'Game already in progress') {
+        // Try rejoin instead — player may be reconnecting mid-game
+        socket.emit('room:rejoin', { roomCode, playerName }, (rejoinRes) => {
+          if (rejoinRes.success && rejoinRes.room) {
+            saveSession({ roomCode: rejoinRes.room.code, playerName });
+            dispatch({ type: 'SET_ROOM', room: rejoinRes.room });
+            navigate('/game');
+          } else {
+            addToast(rejoinRes.error || 'Failed to join room');
+          }
+        });
       } else {
         addToast(res.error || 'Failed to join room');
       }
@@ -70,17 +81,19 @@ export function useRoom() {
       if (res.success && res.room) {
         saveSession({ roomCode: res.room.code, playerName });
         dispatch({ type: 'SET_ROOM', room: res.room });
-        if (res.room.status === 'playing') {
+        // Navigate to game if engine is active (game:started will have set gameState)
+        if (res.room.status === 'playing' || res.room.status === 'finished') {
           navigate('/game');
         } else {
           navigate('/lobby');
         }
       } else {
-        // Rejoin failed — clear stale session
+        // Rejoin failed — clear stale session and notify
         clearSession();
+        addToast(res.error || 'Failed to rejoin room');
       }
     });
-  }, [socket, dispatch, navigate]);
+  }, [socket, dispatch, navigate, addToast]);
 
   const leaveRoom = useCallback(() => {
     if (!socket) return;
