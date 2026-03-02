@@ -1,10 +1,37 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSocket } from '../context/SocketContext';
 import { useGame } from '../context/GameContext';
 
+const SESSION_KEY = 'uno_session';
+
+interface SessionData {
+  roomCode: string;
+  playerName: string;
+}
+
+function saveSession(data: SessionData) {
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify(data));
+}
+
+function loadSession(): SessionData | null {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (data.roomCode && data.playerName) return data;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function clearSession() {
+  sessionStorage.removeItem(SESSION_KEY);
+}
+
 export function useRoom() {
-  const { socket } = useSocket();
+  const { socket, isConnected } = useSocket();
   const { dispatch, addToast } = useGame();
   const navigate = useNavigate();
 
@@ -13,6 +40,7 @@ export function useRoom() {
     dispatch({ type: 'SET_PLAYER_NAME', name: playerName });
     socket.emit('room:create', { playerName }, (res) => {
       if (res.success && res.room) {
+        saveSession({ roomCode: res.room.code, playerName });
         dispatch({ type: 'SET_ROOM', room: res.room });
         navigate('/lobby');
       } else {
@@ -26,6 +54,7 @@ export function useRoom() {
     dispatch({ type: 'SET_PLAYER_NAME', name: playerName });
     socket.emit('room:join', { roomCode, playerName }, (res) => {
       if (res.success && res.room) {
+        saveSession({ roomCode: res.room.code, playerName });
         dispatch({ type: 'SET_ROOM', room: res.room });
         navigate('/lobby');
       } else {
@@ -34,9 +63,29 @@ export function useRoom() {
     });
   }, [socket, dispatch, navigate, addToast]);
 
+  const rejoinRoom = useCallback((roomCode: string, playerName: string) => {
+    if (!socket) return;
+    dispatch({ type: 'SET_PLAYER_NAME', name: playerName });
+    socket.emit('room:rejoin', { roomCode, playerName }, (res) => {
+      if (res.success && res.room) {
+        saveSession({ roomCode: res.room.code, playerName });
+        dispatch({ type: 'SET_ROOM', room: res.room });
+        if (res.room.status === 'playing') {
+          navigate('/game');
+        } else {
+          navigate('/lobby');
+        }
+      } else {
+        // Rejoin failed — clear stale session
+        clearSession();
+      }
+    });
+  }, [socket, dispatch, navigate]);
+
   const leaveRoom = useCallback(() => {
     if (!socket) return;
     socket.emit('room:leave');
+    clearSession();
     dispatch({ type: 'RESET' });
     navigate('/');
   }, [socket, dispatch, navigate]);
@@ -50,5 +99,7 @@ export function useRoom() {
     });
   }, [socket, addToast]);
 
-  return { createRoom, joinRoom, leaveRoom, startGame };
+  return { createRoom, joinRoom, rejoinRoom, leaveRoom, startGame };
 }
+
+export { loadSession, clearSession };

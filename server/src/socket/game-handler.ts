@@ -1,9 +1,13 @@
 import { Server, Socket } from 'socket.io';
 import type { ClientToServerEvents, ServerToClientEvents } from '../../../shared/types';
 import { roomStore } from '../room/room-store';
+import { UNO_CALL_WINDOW_MS } from '../config';
 
 type IO = Server<ClientToServerEvents, ServerToClientEvents>;
 type ClientSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
+
+// Track auto-clear timeouts per room so we can cancel them
+const unoClearTimeouts = new Map<string, NodeJS.Timeout>();
 
 function broadcastGameState(io: IO, roomCode: string): void {
   const room = roomStore.get(roomCode);
@@ -35,6 +39,24 @@ export function registerGameHandlers(io: IO, socket: ClientSocket): void {
 
     // Broadcast updated state
     broadcastGameState(io, roomCode);
+
+    // Schedule auto-clear of mustCallUno after the call window expires
+    if (room.engine.state.mustCallUno) {
+      const targetId = room.engine.state.mustCallUno;
+      // Clear any existing timeout for this room
+      const existingTimeout = unoClearTimeouts.get(roomCode);
+      if (existingTimeout) clearTimeout(existingTimeout);
+
+      const timeout = setTimeout(() => {
+        unoClearTimeouts.delete(roomCode);
+        const currentRoom = roomStore.get(roomCode);
+        if (!currentRoom || !currentRoom.engine) return;
+        if (currentRoom.engine.clearMustCallUno(targetId)) {
+          broadcastGameState(io, roomCode);
+        }
+      }, UNO_CALL_WINDOW_MS);
+      unoClearTimeouts.set(roomCode, timeout);
+    }
 
     // Check if game over
     if (room.engine.state.status === 'finished' && room.engine.state.winnerId) {
@@ -84,11 +106,20 @@ export function registerGameHandlers(io: IO, socket: ClientSocket): void {
     const result = room.engine.callUno(socket.id);
     if (!result.success) return cb({ success: false, error: result.error });
 
+    // Clear auto-clear timeout since UNO was called
+    const callTimeout = unoClearTimeouts.get(roomCode);
+    if (callTimeout) {
+      clearTimeout(callTimeout);
+      unoClearTimeouts.delete(roomCode);
+    }
+
     for (const action of result.actions) {
       io.to(roomCode).emit('game:action', action);
     }
 
     io.to(roomCode).emit('toast', `${room.players.find(p => p.id === socket.id)?.name} called UNO!`);
+
+    broadcastGameState(io, roomCode);
 
     cb({ success: true });
   });
@@ -102,6 +133,13 @@ export function registerGameHandlers(io: IO, socket: ClientSocket): void {
 
     const result = room.engine.catchUno(socket.id, data.targetId);
     if (!result.success) return cb({ success: false, error: result.error });
+
+    // Clear auto-clear timeout since player was caught
+    const catchTimeout = unoClearTimeouts.get(roomCode);
+    if (catchTimeout) {
+      clearTimeout(catchTimeout);
+      unoClearTimeouts.delete(roomCode);
+    }
 
     for (const action of result.actions) {
       io.to(roomCode).emit('game:action', action);

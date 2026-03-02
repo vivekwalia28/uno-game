@@ -98,6 +98,7 @@ export interface ClientToServerEvents {
   // Room
   'room:create': (data: { playerName: string }, cb: (res: RoomResponse) => void) => void;
   'room:join': (data: { roomCode: string; playerName: string }, cb: (res: RoomResponse) => void) => void;
+  'room:rejoin': (data: { roomCode: string; playerName: string }, cb: (res: RoomResponse) => void) => void;
   'room:leave': () => void;
   'room:start': (cb: (res: { success: boolean; error?: string }) => void) => void;
 

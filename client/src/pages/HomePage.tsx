@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useRoom } from '../hooks/useRoom';
+import { useState, useEffect, useRef } from 'react';
+import { useRoom, loadSession } from '../hooks/useRoom';
 import { useSocket } from '../context/SocketContext';
 import { useGame } from '../context/GameContext';
 import Toast from '../components/ui/Toast';
@@ -10,8 +10,19 @@ export default function HomePage() {
   const [roomCode, setRoomCode] = useState('');
   const [mode, setMode] = useState<'menu' | 'create' | 'join'>('menu');
   const { isConnected } = useSocket();
-  const { createRoom, joinRoom } = useRoom();
+  const { createRoom, joinRoom, rejoinRoom } = useRoom();
   const { toasts } = useGame();
+  const rejoinAttempted = useRef(false);
+
+  // Auto-rejoin from sessionStorage on mount
+  useEffect(() => {
+    if (!isConnected || rejoinAttempted.current) return;
+    const session = loadSession();
+    if (session) {
+      rejoinAttempted.current = true;
+      rejoinRoom(session.roomCode, session.playerName);
+    }
+  }, [isConnected, rejoinRoom]);
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();

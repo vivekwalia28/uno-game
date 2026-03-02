@@ -1,6 +1,6 @@
 import { Server, Socket } from 'socket.io';
 import type { ClientToServerEvents, ServerToClientEvents } from '../../../shared/types';
-import { createRoom, joinRoom, leaveRoom, toPublicRoom } from '../room/room-manager';
+import { createRoom, joinRoom, rejoinRoom, leaveRoom, toPublicRoom } from '../room/room-manager';
 import { roomStore } from '../room/room-store';
 
 type IO = Server<ClientToServerEvents, ServerToClientEvents>;
@@ -37,6 +37,41 @@ export function registerRoomHandlers(io: IO, socket: ClientSocket): void {
 
     // Notify others in the room
     socket.to(result.room.code).emit('room:player_joined', publicRoom.players[publicRoom.players.length - 1]);
+    io.to(result.room.code).emit('room:updated', publicRoom);
+
+    cb({ success: true, room: publicRoom });
+  });
+
+  socket.on('room:rejoin', (data, cb) => {
+    const { roomCode, playerName } = data;
+    if (!playerName || playerName.trim().length === 0) {
+      return cb({ success: false, error: 'Name is required' });
+    }
+    if (!roomCode || roomCode.trim().length === 0) {
+      return cb({ success: false, error: 'Room code is required' });
+    }
+
+    const result = rejoinRoom(roomCode.toUpperCase().trim(), socket.id, playerName.trim());
+    if (!result.success || !result.room) {
+      return cb({ success: false, error: result.error });
+    }
+
+    socket.join(result.room.code);
+    const publicRoom = toPublicRoom(result.room);
+
+    // Notify others that the player reconnected
+    const player = result.room.players.find(p => p.id === socket.id);
+    if (player) {
+      socket.to(result.room.code).emit('player:reconnected', player.id);
+    }
+
+    // If game is in progress, send current game state
+    if (result.room.status === 'playing' && result.room.engine) {
+      const clientState = result.room.engine.getClientState(socket.id);
+      io.to(socket.id).emit('game:started', clientState);
+    }
+
+    // Broadcast updated room state
     io.to(result.room.code).emit('room:updated', publicRoom);
 
     cb({ success: true, room: publicRoom });

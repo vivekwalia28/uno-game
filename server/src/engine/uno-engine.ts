@@ -216,10 +216,6 @@ export class UnoEngine {
       return { success: false, error: 'Target doesn\'t need to call UNO', actions };
     }
 
-    if (this.state.unoCallDeadline && Date.now() < this.state.unoCallDeadline) {
-      return { success: false, error: 'UNO call window not expired', actions };
-    }
-
     // Penalty: draw 2 cards
     const targetPlayer = this.state.players.find(p => p.id === targetId);
     if (!targetPlayer) return { success: false, error: 'Target not found', actions };
@@ -289,6 +285,16 @@ export class UnoEngine {
       player.isConnected = true;
       player.disconnectedAt = undefined;
     }
+  }
+
+  /** Clear mustCallUno if it's still set (for auto-clear timeout) */
+  clearMustCallUno(playerId: string): boolean {
+    if (this.state.mustCallUno === playerId) {
+      this.state.mustCallUno = null;
+      this.state.unoCallDeadline = null;
+      return true;
+    }
+    return false;
   }
 
   /** Get top card of discard pile */

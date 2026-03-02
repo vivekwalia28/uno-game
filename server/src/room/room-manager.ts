@@ -63,6 +63,34 @@ export function joinRoom(roomCode: string, socketId: string, playerName: string)
   return { success: true, room };
 }
 
+export function rejoinRoom(roomCode: string, socketId: string, playerName: string): { success: boolean; room?: ServerRoom; error?: string } {
+  const room = roomStore.get(roomCode);
+  if (!room) return { success: false, error: 'Room not found' };
+
+  // Find the disconnected player by name
+  const player = room.players.find(p => p.name === playerName);
+  if (!player) return { success: false, error: 'Player not found in room' };
+  if (player.isConnected) return { success: false, error: 'Player already connected' };
+
+  // Update socket mapping: remove old, set new
+  const oldSocketId = player.id;
+  roomStore.removeSocket(oldSocketId);
+
+  player.id = socketId;
+  player.isConnected = true;
+  player.disconnectedAt = undefined;
+
+  room.playerNames.set(playerName, socketId);
+  roomStore.setSocketRoom(socketId, roomCode);
+
+  // Update game engine if game is in progress
+  if (room.engine) {
+    room.engine.reconnectPlayer(oldSocketId, socketId);
+  }
+
+  return { success: true, room };
+}
+
 export function leaveRoom(socketId: string): { room?: ServerRoom; removedPlayer?: Player; newHost?: string } {
   const roomCode = roomStore.getSocketRoom(socketId);
   if (!roomCode) return {};
