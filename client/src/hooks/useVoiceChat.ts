@@ -18,7 +18,6 @@ export function useVoiceChat(roomJoined: boolean) {
   const peersRef = useRef<Map<string, PeerConnection>>(new Map());
   const analyserNodesRef = useRef<Map<string, AnalyserNode>>(new Map());
   const audioContextRef = useRef<AudioContext | null>(null);
-  // Use a ref to track voice active state so socket handlers always see current value
   const isVoiceActiveRef = useRef(false);
 
   const ensureAudioContext = useCallback(() => {
@@ -34,7 +33,8 @@ export function useVoiceChat(roomJoined: boolean) {
   const createPeer = useCallback((targetId: string, initiator: boolean, stream: MediaStream) => {
     if (!socket) return null;
 
-    // Destroy existing peer for this target if any
+    console.log(`[voice] Creating ${initiator ? 'initiator' : 'receiver'} peer for ${targetId}`);
+
     const existing = peersRef.current.get(targetId);
     if (existing) {
       existing.peer.destroy();
@@ -72,27 +72,32 @@ export function useVoiceChat(roomJoined: boolean) {
     });
 
     peer.on('signal', (signal) => {
+      console.log(`[voice] Sending signal to ${targetId}, type: ${(signal as any).type || 'candidate'}`);
       socket.emit('voice:signal', { targetId, signal });
     });
 
+    peer.on('connect', () => {
+      console.log(`[voice] Peer CONNECTED to ${targetId}`);
+    });
+
     peer.on('stream', (remoteStream) => {
-      // Play remote audio using a persistent Audio element
+      console.log(`[voice] Got remote stream from ${targetId}, tracks: ${remoteStream.getAudioTracks().length}`);
+
       const audio = new Audio();
       audio.autoplay = true;
       audio.srcObject = remoteStream;
 
-      const tryPlay = () => {
-        audio.play().catch(() => {
-          const onClick = () => {
-            audio.play().catch(() => {});
-            document.removeEventListener('click', onClick);
-          };
-          document.addEventListener('click', onClick, { once: true });
-        });
-      };
-      tryPlay();
+      audio.play().then(() => {
+        console.log(`[voice] Audio playing for ${targetId}`);
+      }).catch((err) => {
+        console.warn(`[voice] Audio play blocked for ${targetId}:`, err.message);
+        const onClick = () => {
+          audio.play().then(() => console.log(`[voice] Audio resumed for ${targetId}`)).catch(() => {});
+          document.removeEventListener('click', onClick);
+        };
+        document.addEventListener('click', onClick, { once: true });
+      });
 
-      // Route through AudioContext for speaking detection + backup playback
       const ctx = ensureAudioContext();
       if (ctx.state === 'suspended') ctx.resume();
       const source = ctx.createMediaStreamSource(remoteStream);
@@ -112,6 +117,7 @@ export function useVoiceChat(roomJoined: boolean) {
     });
 
     peer.on('close', () => {
+      console.log(`[voice] Peer closed: ${targetId}`);
       const conn = peersRef.current.get(targetId);
       if (conn?.audioElement) {
         conn.audioElement.pause();
@@ -123,7 +129,7 @@ export function useVoiceChat(roomJoined: boolean) {
     });
 
     peer.on('error', (err) => {
-      console.error(`Peer error with ${targetId}:`, err.message);
+      console.error(`[voice] Peer ERROR with ${targetId}:`, err.message);
       const conn = peersRef.current.get(targetId);
       if (conn?.audioElement) {
         conn.audioElement.pause();
@@ -144,14 +150,17 @@ export function useVoiceChat(roomJoined: boolean) {
   const joinVoice = useCallback(async () => {
     if (!socket) return;
     try {
+      console.log('[voice] Joining voice...');
       ensureAudioContext();
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      console.log(`[voice] Got local stream, tracks: ${stream.getAudioTracks().length}`);
       localStreamRef.current = stream;
       isVoiceActiveRef.current = true;
       setIsVoiceActive(true);
       socket.emit('voice:join');
+      console.log('[voice] Emitted voice:join');
     } catch (err) {
-      console.error('Failed to get microphone:', err);
+      console.error('[voice] Failed to get microphone:', err);
     }
   }, [socket, ensureAudioContext]);
 
@@ -210,17 +219,20 @@ export function useVoiceChat(roomJoined: boolean) {
     return () => clearInterval(interval);
   }, [isVoiceActive]);
 
-  // Socket event listeners — use refs for guards to avoid stale closures
+  // Socket event listeners
   useEffect(() => {
     if (!socket || !roomJoined) return;
 
+    console.log('[voice] Registering socket event listeners');
+
     const handlePeerJoined = (peerId: string) => {
-      // Use refs (always current) instead of state values (stale in closure)
+      console.log(`[voice] Received voice:peer_joined for ${peerId}, voiceActive=${isVoiceActiveRef.current}, hasStream=${!!localStreamRef.current}`);
       if (!localStreamRef.current || !isVoiceActiveRef.current) return;
       createPeer(peerId, true, localStreamRef.current);
     };
 
     const handleSignal = (data: { fromId: string; signal: unknown }) => {
+      console.log(`[voice] Received signal from ${data.fromId}, type: ${(data.signal as any)?.type || 'candidate'}`);
       const existing = peersRef.current.get(data.fromId);
       if (existing) {
         existing.peer.signal(data.signal as SimplePeer.SignalData);
@@ -229,10 +241,13 @@ export function useVoiceChat(roomJoined: boolean) {
         if (peer) {
           peer.signal(data.signal as SimplePeer.SignalData);
         }
+      } else {
+        console.warn(`[voice] Dropped signal from ${data.fromId}: voiceActive=${isVoiceActiveRef.current}, hasStream=${!!localStreamRef.current}`);
       }
     };
 
     const handlePeerLeft = (peerId: string) => {
+      console.log(`[voice] Peer left: ${peerId}`);
       const conn = peersRef.current.get(peerId);
       if (conn) {
         conn.peer.destroy();
@@ -255,7 +270,6 @@ export function useVoiceChat(roomJoined: boolean) {
       socket.off('voice:signal', handleSignal);
       socket.off('voice:peer_left', handlePeerLeft);
     };
-  // Removed isVoiceActive from deps — handlers use isVoiceActiveRef instead
   }, [socket, roomJoined, createPeer]);
 
   // Cleanup on unmount

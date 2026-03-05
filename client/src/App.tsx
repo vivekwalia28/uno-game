@@ -2,6 +2,7 @@ import { Routes, Route } from 'react-router-dom';
 import HomePage from './pages/HomePage';
 import LobbyPage from './pages/LobbyPage';
 import GamePage from './pages/GamePage';
+import BackgroundMusic from './components/ui/BackgroundMusic';
 
 export default function App() {
   return (
@@ -11,6 +12,7 @@ export default function App() {
         <Route path="/lobby" element={<LobbyPage />} />
         <Route path="/game" element={<GamePage />} />
       </Routes>
+      <BackgroundMusic />
     </div>
   );
 }
